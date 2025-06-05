@@ -2,11 +2,13 @@ package services
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sync"
+	"time"
 )
 
 var (
@@ -14,6 +16,7 @@ var (
 	cmdMutex   sync.Mutex
 	isPaused   bool
 	lastUrl    string
+	vlcPort    = "8080" // VLC HTTP interface port
 )
 
 // PlayMedia starts playing the media from the given URL
@@ -40,14 +43,26 @@ func PlayMedia(url string) error {
 
 		for _, path := range vlcPaths {
 			if _, err := os.Stat(path); err == nil {
-				cmd := exec.Command(path, "--intf", "dummy", url)
+				// Start VLC with HTTP interface
+				cmd := exec.Command(path,
+					"--intf", "http", // Enable HTTP interface
+					"--http-port", vlcPort, // Set HTTP port
+					"--http-password", "ytview", // Set password for HTTP interface
+					"--extraintf", "http", // Add HTTP as extra interface
+					"--no-video",      // Disable video output
+					"--play-and-exit", // Exit when playback ends
+					url)
+
 				if err := cmd.Start(); err == nil {
 					currentCmd = cmd
+					// Give VLC a moment to start up its HTTP interface
+					time.Sleep(100 * time.Millisecond)
 					return nil
 				}
 			}
 		}
 
+		// Fallback to QuickTime if VLC is not available
 		cmd := exec.Command("open", "-g", "-a", "QuickTime Player", url)
 		if err := cmd.Start(); err == nil {
 			currentCmd = cmd
@@ -104,15 +119,16 @@ func PauseMedia() error {
 	}
 
 	if runtime.GOOS == "darwin" {
-		// For VLC
-		pauseCmd := exec.Command("killall", "-STOP", "VLC")
-		err := pauseCmd.Run()
+		// Send pause command to VLC's HTTP interface
+		resp, err := http.Get(fmt.Sprintf("http://:%s@localhost:%s/requests/status.xml?command=pl_pause", "ytview", vlcPort))
 		if err == nil {
+			resp.Body.Close()
 			isPaused = true
 			return nil
 		}
-		// For QuickTime
-		pauseCmd = exec.Command("killall", "-STOP", "QuickTime Player")
+
+		// Fallback to QuickTime if VLC command failed
+		pauseCmd := exec.Command("killall", "-STOP", "QuickTime Player")
 		err = pauseCmd.Run()
 		if err == nil {
 			isPaused = true
@@ -129,15 +145,16 @@ func resumeMedia() error {
 	}
 
 	if runtime.GOOS == "darwin" {
-		// For VLC
-		resumeCmd := exec.Command("killall", "-CONT", "VLC")
-		err := resumeCmd.Run()
+		// Send play command to VLC's HTTP interface
+		resp, err := http.Get(fmt.Sprintf("http://:%s@localhost:%s/requests/status.xml?command=pl_play", "ytview", vlcPort))
 		if err == nil {
+			resp.Body.Close()
 			isPaused = false
 			return nil
 		}
-		// For QuickTime
-		resumeCmd = exec.Command("killall", "-CONT", "QuickTime Player")
+
+		// Fallback to QuickTime if VLC command failed
+		resumeCmd := exec.Command("killall", "-CONT", "QuickTime Player")
 		err = resumeCmd.Run()
 		if err == nil {
 			isPaused = false
@@ -151,6 +168,14 @@ func resumeMedia() error {
 func stopCurrentMedia() {
 	if currentCmd != nil && currentCmd.Process != nil {
 		if runtime.GOOS != "windows" {
+			// Try to stop via HTTP interface first
+			if runtime.GOOS == "darwin" {
+				resp, err := http.Get(fmt.Sprintf("http://:%s@localhost:%s/requests/status.xml?command=pl_stop", "ytview", vlcPort))
+				if err == nil {
+					resp.Body.Close()
+					time.Sleep(100 * time.Millisecond) // Give VLC time to stop
+				}
+			}
 			currentCmd.Process.Kill()
 		} else {
 			exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprint(currentCmd.Process.Pid)).Run()
