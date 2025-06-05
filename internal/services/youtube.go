@@ -83,7 +83,6 @@ func GetSongList(query string, maxResults int) ([]models.Video, error) {
 }
 
 func GetVideoAudioUrl(videoId string) (string, error) {
-	log.Println("Getting video audio url for videoId: ", videoId)
 	client := youtube.Client{}
 
 	video, err := client.GetVideo(videoId)

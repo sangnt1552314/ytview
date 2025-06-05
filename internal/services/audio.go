@@ -222,6 +222,7 @@ func IsMediaFinished() bool {
 				// Process not found or finished
 				currentCmd = nil
 				isPaused = false
+				lastUrl = ""
 				return true
 			}
 		}

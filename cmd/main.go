@@ -34,22 +34,22 @@ func NewApp() *App {
 		app:            tview.NewApplication(),
 		music_list:     tview.NewTable(),
 		playing_box:    tview.NewTextView().SetTextAlign(tview.AlignCenter),
-		control_button: tview.NewButton("Play"),
+		control_button: tview.NewButton("▶️ Play"),
 	}
 }
 
 func (app *App) setTableHeader() {
 	// Set headers with styling
 	app.music_list.SetCell(0, 0, tview.NewTableCell("Title").
-		SetMaxWidth(30).SetSelectable(false).
+		SetMaxWidth(18).SetSelectable(false).
 		SetTextColor(tcell.ColorYellow).
 		SetAttributes(tcell.AttrBold))
 	app.music_list.SetCell(0, 1, tview.NewTableCell("Channel").
-		SetMaxWidth(20).SetSelectable(false).
+		SetMaxWidth(9).SetSelectable(false).
 		SetTextColor(tcell.ColorYellow).
 		SetAttributes(tcell.AttrBold))
 	app.music_list.SetCell(0, 2, tview.NewTableCell("Duration").
-		SetMaxWidth(10).
+		SetMaxWidth(5).
 		SetSelectable(false).
 		SetTextColor(tcell.ColorYellow).
 		SetAttributes(tcell.AttrBold))
@@ -62,7 +62,7 @@ func (app *App) performSearch(query string) {
 	app.music_list.Clear()
 	app.setTableHeader()
 
-	songs, err := services.GetSongList(query, 10)
+	songs, err := services.GetSongList(query, 20)
 	if err != nil {
 		app.music_list.SetCell(1, 0, tview.NewTableCell("Error: "+err.Error()))
 		return
@@ -97,6 +97,9 @@ func (app *App) updateControlButton() {
 		if state == "paused" {
 			app.elapsed = time.Since(app.start_time)
 		}
+		if state == "stopped" {
+			app.elapsed = app.duration
+		}
 	}
 	app.updateTimeDisplay()
 }
@@ -125,6 +128,28 @@ func (app *App) playSong(song *models.Video) {
 
 	// Create and start the timer
 	app.timer = time.NewTimer(time.Second)
+	go func() {
+		for range app.timer.C {
+			if services.IsMediaFinished() {
+				app.app.QueueUpdateDraw(func() {
+					app.control_button.SetLabel("▶️ Play")
+					app.playing_box.SetTextColor(tcell.ColorYellow)
+					app.playing_box.SetTitleColor(tcell.ColorYellow)
+					app.elapsed = app.duration
+					app.updateTimeDisplay()
+				})
+				if app.timer != nil {
+					app.timer.Stop()
+				}
+				return
+			}
+
+			app.app.QueueUpdateDraw(func() {
+				app.updateTimeDisplay()
+			})
+			app.timer.Reset(time.Second)
+		}
+	}()
 	app.playing_box.Clear()
 	app.playing_box.SetText("Now Playing: " + song.Title + " - " + song.Channel)
 	app.updateControlButton()
@@ -278,10 +303,8 @@ func main() {
 			services.PauseMedia()
 		} else {
 			if services.IsMediaFinished() {
-				// If song finished, start from beginning
 				app.playSong(app.playing_song)
 			} else {
-				// Otherwise resume from pause
 				services.PlayMedia(app.playing_url)
 			}
 		}
