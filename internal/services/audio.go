@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -193,6 +194,9 @@ func Cleanup() {
 
 // GetPlayerState returns the current state of the player
 func GetPlayerState() string {
+	if IsMediaFinished() {
+		return "stopped"
+	}
 	if currentCmd == nil {
 		return "stopped"
 	}
@@ -200,4 +204,28 @@ func GetPlayerState() string {
 		return "paused"
 	}
 	return "playing"
+}
+
+// Add a function to check if the media is still playing
+func IsMediaFinished() bool {
+	cmdMutex.Lock()
+	defer cmdMutex.Unlock()
+
+	if currentCmd == nil || currentCmd.Process == nil {
+		return true
+	}
+
+	// For VLC, try to get process state
+	if runtime.GOOS != "windows" {
+		if process, err := os.FindProcess(currentCmd.Process.Pid); err == nil {
+			if err := process.Signal(syscall.Signal(0)); err != nil {
+				// Process not found or finished
+				currentCmd = nil
+				isPaused = false
+				return true
+			}
+		}
+	}
+
+	return false
 }

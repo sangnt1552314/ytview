@@ -71,11 +71,14 @@ func (app *App) performSearch(query string) {
 	}
 
 	for i, song := range songs {
+		// Format duration for display
+		duration := formatDuration(parseDuration(song.Duration))
+
 		// Store the full video object as reference in the first cell
 		titleCell := tview.NewTableCell(song.Title).SetReference(&song)
 		app.music_list.SetCell(i+1, 0, titleCell)
 		app.music_list.SetCell(i+1, 1, tview.NewTableCell(song.Channel))
-		app.music_list.SetCell(i+1, 2, tview.NewTableCell(song.Duration))
+		app.music_list.SetCell(i+1, 2, tview.NewTableCell(duration)) // Use formatted duration
 	}
 }
 
@@ -84,6 +87,7 @@ func (app *App) updateControlButton() {
 	if state == "playing" {
 		app.control_button.SetLabel("⏸️ Pause")
 		app.playing_box.SetTextColor(tcell.ColorGreen)
+		app.playing_box.SetTitleColor(tcell.ColorGreen)
 		app.start_time = time.Now().Add(-app.elapsed)
 		if app.timer != nil {
 			app.timer.Reset(time.Second)
@@ -91,9 +95,9 @@ func (app *App) updateControlButton() {
 	} else {
 		app.control_button.SetLabel("▶️ Play")
 		app.playing_box.SetTextColor(tcell.ColorYellow)
-		app.elapsed = time.Since(app.start_time)
-		if app.timer != nil {
-			app.timer.Stop()
+		app.playing_box.SetTitleColor(tcell.ColorYellow)
+		if state == "paused" {
+			app.elapsed = time.Since(app.start_time)
 		}
 	}
 	app.updateTimeDisplay()
@@ -125,13 +129,26 @@ func (app *App) playSong(song *models.Video) {
 	app.start_time = time.Now()
 	app.elapsed = 0
 
+	// Create and start the timer
 	app.timer = time.NewTimer(time.Second)
 	go func() {
-		for range app.timer.C {
-			app.app.QueueUpdateDraw(func() {
-				app.updateTimeDisplay()
-			})
-			if services.GetPlayerState() == "playing" {
+		for {
+			select {
+			case <-app.timer.C:
+				if services.IsMediaFinished() {
+					app.app.QueueUpdateDraw(func() {
+						app.control_button.SetLabel("▶️ Play")
+						app.playing_box.SetTextColor(tcell.ColorYellow)
+						app.playing_box.SetTitleColor(tcell.ColorYellow)
+						app.elapsed = app.duration
+						app.updateTimeDisplay()
+					})
+					return // Exit the goroutine when song finishes
+				}
+
+				app.app.QueueUpdateDraw(func() {
+					app.updateTimeDisplay()
+				})
 				app.timer.Reset(time.Second)
 			}
 		}
@@ -153,11 +170,17 @@ func formatDuration(d time.Duration) string {
 
 func parseDuration(dur string) time.Duration {
 	parts := strings.Split(dur, ":")
-	if len(parts) == 2 {
+	if len(parts) == 1 {
+		// Only seconds
+		sec, _ := strconv.Atoi(parts[0])
+		return time.Duration(sec) * time.Second
+	} else if len(parts) == 2 {
+		// Minutes:Seconds
 		min, _ := strconv.Atoi(parts[0])
 		sec, _ := strconv.Atoi(parts[1])
 		return time.Duration(min)*time.Minute + time.Duration(sec)*time.Second
 	} else if len(parts) == 3 {
+		// Hours:Minutes:Seconds
 		hour, _ := strconv.Atoi(parts[0])
 		min, _ := strconv.Atoi(parts[1])
 		sec, _ := strconv.Atoi(parts[2])
@@ -173,10 +196,27 @@ func (app *App) updateTimeDisplay() {
 	}
 
 	var elapsed time.Duration
-	if services.GetPlayerState() == "playing" {
+	state := services.GetPlayerState()
+
+	if state == "playing" {
 		elapsed = time.Since(app.start_time)
-	} else {
+		app.playing_box.SetTextColor(tcell.ColorGreen)
+		app.playing_box.SetTitleColor(tcell.ColorGreen)
+		if app.timer != nil {
+			app.timer.Reset(time.Second)
+		}
+	} else if state == "paused" {
 		elapsed = app.elapsed
+		app.playing_box.SetTextColor(tcell.ColorYellow)
+		app.playing_box.SetTitleColor(tcell.ColorYellow)
+	} else if state == "stopped" {
+		elapsed = app.duration // Show full duration when stopped
+		app.playing_box.SetTextColor(tcell.ColorYellow)
+		app.playing_box.SetTitleColor(tcell.ColorYellow)
+		app.control_button.SetLabel("▶️ Play")
+		if app.timer != nil {
+			app.timer.Stop()
+		}
 	}
 
 	if elapsed > app.duration {
@@ -188,13 +228,6 @@ func (app *App) updateTimeDisplay() {
 		formatDuration(app.duration))
 
 	app.playing_box.SetTitle(title)
-
-	// Set the title color based on player state
-	if services.GetPlayerState() == "playing" {
-		app.playing_box.SetTitleColor(tcell.ColorGreen)
-	} else {
-		app.playing_box.SetTitleColor(tcell.ColorYellow)
-	}
 }
 
 func main() {
@@ -273,7 +306,13 @@ func main() {
 		if state == "playing" {
 			services.PauseMedia()
 		} else {
-			services.PlayMedia(app.playing_url)
+			if services.IsMediaFinished() {
+				// If song finished, start from beginning
+				app.playSong(app.playing_song)
+			} else {
+				// Otherwise resume from pause
+				services.PlayMedia(app.playing_url)
+			}
 		}
 		app.updateControlButton()
 	})
