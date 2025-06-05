@@ -1,10 +1,14 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -16,9 +20,13 @@ type App struct {
 	app            *tview.Application
 	music_list     *tview.Table
 	playing_song   *models.Video
-	playing_url    string // Add this field to store the current audio URL
+	playing_url    string
 	playing_box    *tview.TextView
 	control_button *tview.Button
+	timer          *time.Timer
+	start_time     time.Time
+	duration       time.Duration
+	elapsed        time.Duration
 }
 
 func NewApp() *App {
@@ -56,7 +64,7 @@ func (app *App) performSearch(query string) {
 	app.music_list.Clear()
 	app.setTableHeader()
 
-	songs, err := services.GetSongList(query, 5)
+	songs, err := services.GetSongList(query, 10)
 	if err != nil {
 		app.music_list.SetCell(1, 0, tview.NewTableCell("Error: "+err.Error()))
 		return
@@ -76,14 +84,27 @@ func (app *App) updateControlButton() {
 	if state == "playing" {
 		app.control_button.SetLabel("⏸️ Pause")
 		app.playing_box.SetTextColor(tcell.ColorGreen)
+		app.start_time = time.Now().Add(-app.elapsed)
+		if app.timer != nil {
+			app.timer.Reset(time.Second)
+		}
 	} else {
 		app.control_button.SetLabel("▶️ Play")
 		app.playing_box.SetTextColor(tcell.ColorYellow)
+		app.elapsed = time.Since(app.start_time)
+		if app.timer != nil {
+			app.timer.Stop()
+		}
 	}
+	app.updateTimeDisplay()
 }
 
 func (app *App) playSong(song *models.Video) {
 	log.Printf("Playing song: %s", song.Title)
+
+	if app.timer != nil {
+		app.timer.Stop()
+	}
 
 	audioUrl, err := services.GetVideoAudioUrl(song.ID)
 	if err != nil {
@@ -100,9 +121,73 @@ func (app *App) playSong(song *models.Video) {
 
 	app.playing_song = song
 	app.playing_url = audioUrl
+	app.duration = parseDuration(song.Duration)
+	app.start_time = time.Now()
+	app.elapsed = 0
+
+	app.timer = time.NewTimer(time.Second)
+	go func() {
+		for range app.timer.C {
+			app.app.QueueUpdateDraw(func() {
+				app.updateTimeDisplay()
+			})
+			if services.GetPlayerState() == "playing" {
+				app.timer.Reset(time.Second)
+			}
+		}
+	}()
+
 	app.playing_box.Clear()
 	app.playing_box.SetText("Now Playing: " + song.Title + " - " + song.Channel)
 	app.updateControlButton()
+	app.updateTimeDisplay()
+}
+
+func formatDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	m := d / time.Minute
+	d -= m * time.Minute
+	s := d / time.Second
+	return fmt.Sprintf("%02d:%02d", m, s)
+}
+
+func parseDuration(dur string) time.Duration {
+	parts := strings.Split(dur, ":")
+	if len(parts) == 2 {
+		min, _ := strconv.Atoi(parts[0])
+		sec, _ := strconv.Atoi(parts[1])
+		return time.Duration(min)*time.Minute + time.Duration(sec)*time.Second
+	} else if len(parts) == 3 {
+		hour, _ := strconv.Atoi(parts[0])
+		min, _ := strconv.Atoi(parts[1])
+		sec, _ := strconv.Atoi(parts[2])
+		return time.Duration(hour)*time.Hour + time.Duration(min)*time.Minute + time.Duration(sec)*time.Second
+	}
+	return 0
+}
+
+func (app *App) updateTimeDisplay() {
+	if app.playing_song == nil {
+		app.playing_box.SetTitle(" 0:00 / 0:00 ")
+		return
+	}
+
+	var elapsed time.Duration
+	if services.GetPlayerState() == "playing" {
+		elapsed = time.Since(app.start_time)
+	} else {
+		elapsed = app.elapsed
+	}
+
+	if elapsed > app.duration {
+		elapsed = app.duration
+	}
+
+	title := fmt.Sprintf(" %s / %s ",
+		formatDuration(elapsed),
+		formatDuration(app.duration))
+
+	app.playing_box.SetTitle(title)
 }
 
 func main() {
@@ -130,6 +215,9 @@ func main() {
 	// Add input capture to handle Ctrl+C and 'q' globally
 	app.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyCtrlC || event.Rune() == 'q' {
+			if app.timer != nil {
+				app.timer.Stop()
+			}
 			services.Cleanup()
 			app.app.Stop()
 			return nil
@@ -176,7 +264,6 @@ func main() {
 		if state == "playing" {
 			services.PauseMedia()
 		} else {
-			// Use the stored audio URL instead of video ID
 			services.PlayMedia(app.playing_url)
 		}
 		app.updateControlButton()
@@ -220,6 +307,9 @@ func main() {
 	menu := tview.NewList()
 	menu.AddItem("Settings", "", 's', nil)
 	menu.AddItem("Exit", "", 'q', func() {
+		if app.timer != nil {
+			app.timer.Stop()
+		}
 		services.Cleanup()
 		app.app.Stop()
 	})
