@@ -6,9 +6,21 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
+)
+
+var (
+	currentCmd *exec.Cmd
+	cmdMutex   sync.Mutex
 )
 
 func PlayMedia(url string) error {
+	// Stop any currently playing media first
+	stopCurrentMedia()
+
+	cmdMutex.Lock()
+	defer cmdMutex.Unlock()
+
 	switch runtime.GOOS {
 	case "darwin":
 		// macOS: Try VLC first, then fall back to QuickTime Player
@@ -22,6 +34,7 @@ func PlayMedia(url string) error {
 			if _, err := os.Stat(path); err == nil {
 				cmd := exec.Command(path, "--intf", "dummy", url)
 				if err := cmd.Start(); err == nil {
+					currentCmd = cmd
 					return nil
 				}
 			}
@@ -29,6 +42,10 @@ func PlayMedia(url string) error {
 
 		// Fall back to QuickTime Player if VLC is not available
 		cmd := exec.Command("open", "-g", "-a", "QuickTime Player", url)
+		if err := cmd.Start(); err == nil {
+			currentCmd = cmd
+			return nil
+		}
 		return cmd.Start()
 
 	case "windows":
@@ -44,6 +61,7 @@ func PlayMedia(url string) error {
 			if _, err := os.Stat(player); err == nil {
 				cmd := exec.Command(player, "--qt-start-minimized", url)
 				if err := cmd.Start(); err == nil {
+					currentCmd = cmd
 					return nil
 				}
 			}
@@ -57,6 +75,7 @@ func PlayMedia(url string) error {
 			if path, err := exec.LookPath(player); err == nil {
 				cmd := exec.Command(path, "--intf", "dummy", url)
 				if err := cmd.Start(); err == nil {
+					currentCmd = cmd
 					return nil
 				}
 			}
@@ -66,4 +85,25 @@ func PlayMedia(url string) error {
 	default:
 		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
 	}
+}
+
+// stopCurrentMedia stops any currently playing media
+func stopCurrentMedia() {
+	cmdMutex.Lock()
+	defer cmdMutex.Unlock()
+
+	if currentCmd != nil && currentCmd.Process != nil {
+		// On Unix-like systems, negative PID kills process group
+		if runtime.GOOS != "windows" {
+			currentCmd.Process.Kill()
+		} else {
+			exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprint(currentCmd.Process.Pid)).Run()
+		}
+		currentCmd = nil
+	}
+}
+
+// Cleanup should be called when your application exits
+func Cleanup() {
+	stopCurrentMedia()
 }

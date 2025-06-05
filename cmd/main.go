@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -98,8 +100,28 @@ func main() {
 	defer logFile.Close()
 	log.SetOutput(logFile)
 
+	// Setup signal handling for cleanup
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+	go func() {
+		sig := <-c
+		log.Printf("Received signal %v, cleaning up...", sig)
+		services.Cleanup()
+		os.Exit(0)
+	}()
+
 	// Initialize app
 	app := NewApp()
+
+	// Add input capture to handle Ctrl+C and 'q' globally
+	app.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyCtrlC || event.Rune() == 'q' {
+			services.Cleanup()
+			app.app.Stop()
+			return nil
+		}
+		return event
+	})
 
 	// Containers
 	main_box := tview.NewFlex().SetDirection(tview.FlexRow)
@@ -131,8 +153,12 @@ func main() {
 		SetTitle("Control").
 		SetTitleAlign(tview.AlignLeft)
 
-	play_button := tview.NewButton("Play")
-	stop_button := tview.NewButton("Stop")
+	play_button := tview.NewButton("Play").SetSelectedFunc(func() {
+		services.PlayMedia(app.playing_song.ID)
+	})
+	stop_button := tview.NewButton("Stop").SetSelectedFunc(func() {
+		services.Cleanup()
+	})
 
 	button_control_box.AddItem(play_button, 0, 1, false)
 	button_control_box.AddItem(stop_button, 0, 1, false)
@@ -173,6 +199,7 @@ func main() {
 	menu := tview.NewList()
 	menu.AddItem("Settings", "", 's', nil)
 	menu.AddItem("Exit", "", 'q', func() {
+		services.Cleanup()
 		app.app.Stop()
 	})
 	menu.SetBorder(true).SetTitle("Menu")
