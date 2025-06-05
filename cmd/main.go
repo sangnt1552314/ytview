@@ -30,11 +30,15 @@ type App struct {
 }
 
 func NewApp() *App {
+	button := tview.NewButton("▶️ Play")
+	button.SetActivatedStyle(tcell.Style{}.Background(tcell.ColorBlack))
+	button.SetStyle(tcell.Style{}.Background(tcell.ColorBlack))
+
 	return &App{
 		app:            tview.NewApplication(),
 		music_list:     tview.NewTable(),
 		playing_box:    tview.NewTextView().SetTextAlign(tview.AlignCenter),
-		control_button: tview.NewButton("▶️ Play"),
+		control_button: button,
 	}
 }
 
@@ -265,6 +269,9 @@ func main() {
 	main_box := tview.NewFlex().SetDirection(tview.FlexRow)
 	flex_box := tview.NewFlex().SetDirection(tview.FlexColumn)
 
+	// Set main_box to full screen
+	main_box.SetFullScreen(true)
+
 	// Container - Music box
 	music_box := tview.NewFlex()
 	music_box.SetDirection(tview.FlexRow)
@@ -364,7 +371,10 @@ func main() {
 	flex_box.AddItem(menu, 0, 1, false)
 	flex_box.AddItem(music_box, 0, 5, false)
 
-	if err := app.app.SetRoot(main_box, true).EnableMouse(true).Run(); err != nil {
+	if err := app.app.
+		SetRoot(main_box, true).
+		EnableMouse(true).
+		Run(); err != nil {
 		panic(err)
 	}
 }
