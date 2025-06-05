@@ -1,8 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"path/filepath"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -77,10 +80,41 @@ func (app *App) playSong(song *models.Video) {
 
 	log.Printf("Audio URL: %s", audioUrl)
 
+	// Play the audio using VLC
+	if err := playAudioWithVLC(audioUrl); err != nil {
+		log.Printf("Error playing audio with VLC: %v", err)
+		return
+	}
+
 	// Update the UI
 	app.playing_song = song
 	app.playing_box.Clear()
 	app.playing_box.SetText("Now Playing: " + song.Title + " - " + song.Channel)
+}
+
+func playAudioWithVLC(audioUrl string) error {
+	// Default VLC paths for macOS
+	vlcPaths := []string{
+		"/Applications/VLC.app/Contents/MacOS/VLC",
+		filepath.Join(os.Getenv("HOME"), "Applications/VLC.app/Contents/MacOS/VLC"),
+	}
+
+	var vlcPath string
+	// Find the first existing VLC path
+	for _, path := range vlcPaths {
+		if _, err := os.Stat(path); err == nil {
+			vlcPath = path
+			break
+		}
+	}
+
+	if vlcPath == "" {
+		return fmt.Errorf("VLC not found in standard locations")
+	}
+
+	// Create and start the VLC process
+	cmd := exec.Command(vlcPath, audioUrl)
+	return cmd.Start()
 }
 
 func main() {

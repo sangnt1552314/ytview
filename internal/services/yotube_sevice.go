@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -87,13 +88,15 @@ func GetVideoAudioUrl(videoId string) (string, error) {
 
 	video, err := client.GetVideo(videoId)
 	if err != nil {
-		return "", fmt.Errorf("failed to get video: %w", err)
+		return "", errors.New("failed to get video")
 	}
 
 	for {
 		format := video.Formats.WithAudioChannels()
 		audio, err := client.GetStreamURL(video, &format[0])
+
 		if err != nil {
+			log.Printf("Error getting stream url: %v", err)
 			continue
 		}
 
