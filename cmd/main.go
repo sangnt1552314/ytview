@@ -75,8 +75,10 @@ func (app *App) updateControlButton() {
 	state := services.GetPlayerState()
 	if state == "playing" {
 		app.control_button.SetLabel("⏸️ Pause")
+		app.playing_box.SetTextColor(tcell.ColorGreen)
 	} else {
 		app.control_button.SetLabel("▶️ Play")
+		app.playing_box.SetTextColor(tcell.ColorYellow)
 	}
 }
 
@@ -97,7 +99,7 @@ func (app *App) playSong(song *models.Video) {
 	}
 
 	app.playing_song = song
-	app.playing_url = audioUrl // Store the audio URL
+	app.playing_url = audioUrl
 	app.playing_box.Clear()
 	app.playing_box.SetText("Now Playing: " + song.Title + " - " + song.Channel)
 	app.updateControlButton()
@@ -158,7 +160,7 @@ func main() {
 	// Set up the playing box
 	app.playing_box.SetBorder(true).SetTitle(" 0:00 / 0:00 ")
 	app.playing_box.SetText("No Playing Song")
-	app.playing_box.SetTextColor(tcell.ColorWhite)
+	app.playing_box.SetTextColor(tcell.ColorYellow)
 
 	button_control_box := tview.NewFlex().SetDirection(tview.FlexColumn)
 	button_control_box.SetBorder(true).
