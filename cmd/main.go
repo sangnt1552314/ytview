@@ -188,6 +188,13 @@ func (app *App) updateTimeDisplay() {
 		formatDuration(app.duration))
 
 	app.playing_box.SetTitle(title)
+
+	// Set the title color based on player state
+	if services.GetPlayerState() == "playing" {
+		app.playing_box.SetTitleColor(tcell.ColorGreen)
+	} else {
+		app.playing_box.SetTitleColor(tcell.ColorYellow)
+	}
 }
 
 func main() {
@@ -246,7 +253,9 @@ func main() {
 	player_box.SetTitle("")
 
 	// Set up the playing box
-	app.playing_box.SetBorder(true).SetTitle(" 0:00 / 0:00 ")
+	app.playing_box.SetBorder(true).
+		SetTitle(" 0:00 / 0:00 ").
+		SetTitleColor(tcell.ColorYellow) // Set initial color
 	app.playing_box.SetText("No Playing Song")
 	app.playing_box.SetTextColor(tcell.ColorYellow)
 
