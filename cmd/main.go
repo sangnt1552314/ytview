@@ -59,8 +59,6 @@ func (app *App) setTableHeader() {
 }
 
 func (app *App) performSearch(query string) {
-	log.Printf("Performing search for query: %s", query)
-
 	app.music_list.Clear()
 	app.setTableHeader()
 
@@ -104,8 +102,6 @@ func (app *App) updateControlButton() {
 }
 
 func (app *App) playSong(song *models.Video) {
-	log.Printf("Playing song: %s", song.Title)
-
 	if app.timer != nil {
 		app.timer.Stop()
 	}
@@ -115,8 +111,6 @@ func (app *App) playSong(song *models.Video) {
 		log.Printf("Error getting video audio url: %v", err)
 		return
 	}
-
-	log.Printf("Audio URL: %s", audioUrl)
 
 	if err := services.PlayMedia(audioUrl); err != nil {
 		log.Printf("Error playing media: %v", err)
@@ -131,29 +125,6 @@ func (app *App) playSong(song *models.Video) {
 
 	// Create and start the timer
 	app.timer = time.NewTimer(time.Second)
-	go func() {
-		for {
-			select {
-			case <-app.timer.C:
-				if services.IsMediaFinished() {
-					app.app.QueueUpdateDraw(func() {
-						app.control_button.SetLabel("▶️ Play")
-						app.playing_box.SetTextColor(tcell.ColorYellow)
-						app.playing_box.SetTitleColor(tcell.ColorYellow)
-						app.elapsed = app.duration
-						app.updateTimeDisplay()
-					})
-					return // Exit the goroutine when song finishes
-				}
-
-				app.app.QueueUpdateDraw(func() {
-					app.updateTimeDisplay()
-				})
-				app.timer.Reset(time.Second)
-			}
-		}
-	}()
-
 	app.playing_box.Clear()
 	app.playing_box.SetText("Now Playing: " + song.Title + " - " + song.Channel)
 	app.updateControlButton()
@@ -329,7 +300,6 @@ func main() {
 			cell := app.music_list.GetCell(row, 0)
 			video, ok := cell.GetReference().(*models.Video)
 			if ok {
-				log.Printf("Selected video ID: %s", video.ID)
 				app.playSong(video)
 			}
 		}
