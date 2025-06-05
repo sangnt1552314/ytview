@@ -13,17 +13,20 @@ import (
 )
 
 type App struct {
-	app          *tview.Application
-	music_list   *tview.Table
-	playing_song *models.Video
-	playing_box  *tview.TextView
+	app            *tview.Application
+	music_list     *tview.Table
+	playing_song   *models.Video
+	playing_url    string // Add this field to store the current audio URL
+	playing_box    *tview.TextView
+	control_button *tview.Button
 }
 
 func NewApp() *App {
 	return &App{
-		app:         tview.NewApplication(),
-		music_list:  tview.NewTable(),
-		playing_box: tview.NewTextView().SetTextAlign(tview.AlignCenter),
+		app:            tview.NewApplication(),
+		music_list:     tview.NewTable(),
+		playing_box:    tview.NewTextView().SetTextAlign(tview.AlignCenter),
+		control_button: tview.NewButton("Play"),
 	}
 }
 
@@ -68,6 +71,15 @@ func (app *App) performSearch(query string) {
 	}
 }
 
+func (app *App) updateControlButton() {
+	state := services.GetPlayerState()
+	if state == "playing" {
+		app.control_button.SetLabel("⏸️ Pause")
+	} else {
+		app.control_button.SetLabel("▶️ Play")
+	}
+}
+
 func (app *App) playSong(song *models.Video) {
 	log.Printf("Playing song: %s", song.Title)
 
@@ -79,16 +91,16 @@ func (app *App) playSong(song *models.Video) {
 
 	log.Printf("Audio URL: %s", audioUrl)
 
-	// Play the media using available player
 	if err := services.PlayMedia(audioUrl); err != nil {
 		log.Printf("Error playing media: %v", err)
 		return
 	}
 
-	// Update the UI
 	app.playing_song = song
+	app.playing_url = audioUrl // Store the audio URL
 	app.playing_box.Clear()
 	app.playing_box.SetText("Now Playing: " + song.Title + " - " + song.Channel)
+	app.updateControlButton()
 }
 
 func main() {
@@ -153,15 +165,22 @@ func main() {
 		SetTitle("Control").
 		SetTitleAlign(tview.AlignLeft)
 
-	play_button := tview.NewButton("Play").SetSelectedFunc(func() {
-		services.PlayMedia(app.playing_song.ID)
-	})
-	stop_button := tview.NewButton("Stop").SetSelectedFunc(func() {
-		services.Cleanup()
+	app.control_button.SetSelectedFunc(func() {
+		if app.playing_song == nil {
+			return
+		}
+
+		state := services.GetPlayerState()
+		if state == "playing" {
+			services.PauseMedia()
+		} else {
+			// Use the stored audio URL instead of video ID
+			services.PlayMedia(app.playing_url)
+		}
+		app.updateControlButton()
 	})
 
-	button_control_box.AddItem(play_button, 0, 1, false)
-	button_control_box.AddItem(stop_button, 0, 1, false)
+	button_control_box.AddItem(app.control_button, 0, 1, true)
 
 	player_box.AddItem(app.playing_box, 0, 5, false)
 	player_box.AddItem(button_control_box, 0, 1, false)
