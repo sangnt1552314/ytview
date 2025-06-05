@@ -39,7 +39,8 @@ jobs:
           if [ "${{ matrix.goos }}" = "windows" ]; then
             BINARY_NAME=$BINARY_NAME.exe
           fi
-          go build -v -o "dist/${BINARY_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}" ./cmd/ytview
+          mkdir -p dist
+          go build -v -o "dist/${BINARY_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}" ./cmd/main.go
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
