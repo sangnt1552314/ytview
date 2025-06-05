@@ -56,6 +56,17 @@ func PlayMedia(url string) error {
 
 				if err := cmd.Start(); err == nil {
 					currentCmd = cmd
+					// Monitor process in background
+					go func() {
+						cmd.Wait()
+						cmdMutex.Lock()
+						if currentCmd == cmd {
+							currentCmd = nil
+							isPaused = false
+							lastUrl = ""
+						}
+						cmdMutex.Unlock()
+					}()
 					// Give VLC a moment to start up its HTTP interface
 					time.Sleep(100 * time.Millisecond)
 					return nil
@@ -67,6 +78,16 @@ func PlayMedia(url string) error {
 		cmd := exec.Command("open", "-g", "-a", "QuickTime Player", url)
 		if err := cmd.Start(); err == nil {
 			currentCmd = cmd
+			go func() {
+				cmd.Wait()
+				cmdMutex.Lock()
+				if currentCmd == cmd {
+					currentCmd = nil
+					isPaused = false
+					lastUrl = ""
+				}
+				cmdMutex.Unlock()
+			}()
 			return nil
 		}
 		return cmd.Start()
@@ -85,6 +106,16 @@ func PlayMedia(url string) error {
 				cmd := exec.Command(player, "--qt-start-minimized", url)
 				if err := cmd.Start(); err == nil {
 					currentCmd = cmd
+					go func() {
+						cmd.Wait()
+						cmdMutex.Lock()
+						if currentCmd == cmd {
+							currentCmd = nil
+							isPaused = false
+							lastUrl = ""
+						}
+						cmdMutex.Unlock()
+					}()
 					return nil
 				}
 			}
@@ -99,6 +130,16 @@ func PlayMedia(url string) error {
 				cmd := exec.Command(path, "--intf", "dummy", url)
 				if err := cmd.Start(); err == nil {
 					currentCmd = cmd
+					go func() {
+						cmd.Wait()
+						cmdMutex.Lock()
+						if currentCmd == cmd {
+							currentCmd = nil
+							isPaused = false
+							lastUrl = ""
+						}
+						cmdMutex.Unlock()
+					}()
 					return nil
 				}
 			}
@@ -215,16 +256,34 @@ func IsMediaFinished() bool {
 		return true
 	}
 
-	// For VLC, try to get process state
+	// Check if process has exited
 	if runtime.GOOS != "windows" {
 		if process, err := os.FindProcess(currentCmd.Process.Pid); err == nil {
-			if err := process.Signal(syscall.Signal(0)); err != nil {
+			// On Unix systems, FindProcess always succeeds, so we need to send signal 0 to test if process exists
+			err := process.Signal(syscall.Signal(0))
+			if err != nil {
 				// Process not found or finished
 				currentCmd = nil
 				isPaused = false
 				lastUrl = ""
 				return true
 			}
+
+			// Additional check: see if process has exited
+			if currentCmd.ProcessState != nil && currentCmd.ProcessState.Exited() {
+				currentCmd = nil
+				isPaused = false
+				lastUrl = ""
+				return true
+			}
+		}
+	} else {
+		// For Windows
+		if currentCmd.ProcessState != nil && currentCmd.ProcessState.Exited() {
+			currentCmd = nil
+			isPaused = false
+			lastUrl = ""
+			return true
 		}
 	}
 

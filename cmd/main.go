@@ -130,26 +130,26 @@ func (app *App) playSong(song *models.Video) {
 	app.timer = time.NewTimer(time.Second)
 	go func() {
 		for range app.timer.C {
-			if services.IsMediaFinished() {
-				app.app.QueueUpdateDraw(func() {
-					app.control_button.SetLabel("▶️ Play")
-					app.playing_box.SetTextColor(tcell.ColorYellow)
-					app.playing_box.SetTitleColor(tcell.ColorYellow)
-					app.elapsed = app.duration
-					app.updateTimeDisplay()
-				})
-				if app.timer != nil {
-					app.timer.Stop()
-				}
-				return
-			}
-
 			app.app.QueueUpdateDraw(func() {
 				app.updateTimeDisplay()
 			})
 			app.timer.Reset(time.Second)
 		}
 	}()
+
+	if services.GetPlayerState() == "stopped" {
+		app.app.QueueUpdateDraw(func() {
+			app.control_button.SetLabel("▶️ Play")
+			app.playing_box.SetTextColor(tcell.ColorYellow)
+			app.playing_box.SetTitleColor(tcell.ColorYellow)
+			app.elapsed = app.duration
+			app.updateTimeDisplay()
+		})
+		if app.timer != nil {
+			app.timer.Stop()
+		}
+	}
+
 	app.playing_box.Clear()
 	app.playing_box.SetText("Now Playing: " + song.Title + " - " + song.Channel)
 	app.updateControlButton()
@@ -288,10 +288,8 @@ func main() {
 	app.playing_box.SetText("No Playing Song")
 	app.playing_box.SetTextColor(tcell.ColorYellow)
 
-	button_control_box := tview.NewFlex().SetDirection(tview.FlexColumn)
-	button_control_box.SetBorder(true).
-		SetTitle("Control").
-		SetTitleAlign(tview.AlignLeft)
+	button_control_box := tview.NewFlex()
+	button_control_box.SetBorder(true)
 
 	app.control_button.SetSelectedFunc(func() {
 		if app.playing_song == nil {
@@ -331,8 +329,9 @@ func main() {
 	// Search box
 	search_box := tview.NewInputField()
 	search_box.SetBorder(true)
-	search_box.SetLabel("Search: ")
 	search_box.SetTitle("Search")
+	search_box.SetFieldBackgroundColor(tcell.ColorNone)
+	search_box.SetFieldTextColor(tcell.ColorWhite)
 	search_box.SetTitleAlign(tview.AlignLeft)
 	search_box.SetDoneFunc(func(key tcell.Key) {
 		if key == tcell.KeyEnter {
