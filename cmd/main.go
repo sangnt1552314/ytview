@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -69,6 +70,66 @@ func (app *App) performSearch(query string) {
 	}
 }
 
+func playMedia(url string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		// macOS: Try VLC first, then fall back to QuickTime Player
+		vlcPaths := []string{
+			"/Applications/VLC.app/Contents/MacOS/VLC",
+			filepath.Join(os.Getenv("HOME"), "Applications/VLC.app/Contents/MacOS/VLC"),
+		}
+
+		// Try VLC first
+		for _, path := range vlcPaths {
+			if _, err := os.Stat(path); err == nil {
+				cmd := exec.Command(path, url)
+				if err := cmd.Start(); err == nil {
+					return nil
+				}
+			}
+		}
+
+		// Fall back to QuickTime Player if VLC is not available
+		cmd := exec.Command("open", "-a", "QuickTime Player", url)
+		return cmd.Start()
+
+	case "windows":
+		// Windows: Try Windows Media Player, then VLC
+		mediaPlayers := []string{
+			filepath.Join(os.Getenv("ProgramFiles(x86)"), "Windows Media Player", "wmplayer.exe"),
+			filepath.Join(os.Getenv("ProgramFiles"), "Windows Media Player", "wmplayer.exe"),
+			filepath.Join(os.Getenv("ProgramFiles(x86)"), "VideoLAN", "VLC", "vlc.exe"),
+			filepath.Join(os.Getenv("ProgramFiles"), "VideoLAN", "VLC", "vlc.exe"),
+		}
+
+		for _, player := range mediaPlayers {
+			if _, err := os.Stat(player); err == nil {
+				cmd := exec.Command(player, url)
+				if err := cmd.Start(); err == nil {
+					return nil
+				}
+			}
+		}
+		return fmt.Errorf("no suitable media player found")
+
+	case "linux":
+		// Linux: Try multiple players in order
+		players := []string{"vlc", "mpv", "mplayer"}
+		for _, player := range players {
+			if path, err := exec.LookPath(player); err == nil {
+				cmd := exec.Command(path, url)
+				if err := cmd.Start(); err == nil {
+					return nil
+				}
+			}
+		}
+		return fmt.Errorf("no suitable media player found")
+
+	default:
+		return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+	}
+}
+
 func (app *App) playSong(song *models.Video) {
 	log.Printf("Playing song: %s", song.Title)
 
@@ -80,9 +141,9 @@ func (app *App) playSong(song *models.Video) {
 
 	log.Printf("Audio URL: %s", audioUrl)
 
-	// Play the audio using VLC
-	if err := playAudioWithVLC(audioUrl); err != nil {
-		log.Printf("Error playing audio with VLC: %v", err)
+	// Play the media using available player
+	if err := playMedia(audioUrl); err != nil {
+		log.Printf("Error playing media: %v", err)
 		return
 	}
 
@@ -90,31 +151,6 @@ func (app *App) playSong(song *models.Video) {
 	app.playing_song = song
 	app.playing_box.Clear()
 	app.playing_box.SetText("Now Playing: " + song.Title + " - " + song.Channel)
-}
-
-func playAudioWithVLC(audioUrl string) error {
-	// Default VLC paths for macOS
-	vlcPaths := []string{
-		"/Applications/VLC.app/Contents/MacOS/VLC",
-		filepath.Join(os.Getenv("HOME"), "Applications/VLC.app/Contents/MacOS/VLC"),
-	}
-
-	var vlcPath string
-	// Find the first existing VLC path
-	for _, path := range vlcPaths {
-		if _, err := os.Stat(path); err == nil {
-			vlcPath = path
-			break
-		}
-	}
-
-	if vlcPath == "" {
-		return fmt.Errorf("VLC not found in standard locations")
-	}
-
-	// Create and start the VLC process
-	cmd := exec.Command(vlcPath, audioUrl)
-	return cmd.Start()
 }
 
 func main() {
