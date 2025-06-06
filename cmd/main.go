@@ -266,11 +266,11 @@ func main() {
 	})
 
 	// Containers
-	main_box := tview.NewFlex().SetDirection(tview.FlexRow)
-	flex_box := tview.NewFlex().SetDirection(tview.FlexColumn)
-
-	// Set main_box to full screen
+	main_box := tview.NewFlex()
+	main_box.SetDirection(tview.FlexRow)
 	main_box.SetFullScreen(true)
+
+	flex_box := tview.NewFlex().SetDirection(tview.FlexColumn)
 
 	// Container - Music box
 	music_box := tview.NewFlex()
