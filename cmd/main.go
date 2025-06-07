@@ -231,8 +231,13 @@ func (app *App) updateTimeDisplay() {
 }
 
 func main() {
+	// Ensure logs directory exists
+	if err := os.MkdirAll("../logs", 0755); err != nil {
+		panic(fmt.Errorf("failed to create logs directory: %w", err))
+	}
+
 	// Setup logging
-	logFile, err := os.OpenFile("logs/ytview.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	logFile, err := os.OpenFile("../logs/ytview.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		panic(err)
 	}
