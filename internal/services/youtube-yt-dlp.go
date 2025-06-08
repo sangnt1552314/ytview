@@ -32,7 +32,7 @@ func GetSongListYtDlp(query string, maxResults int) ([]models.Video, error) {
 	// query = strings.Replace(query, " ", "+", -1)
 
 	args := []string{
-		// "--extractor-args", "youtube:categories='Gaming'",
+		// "--match-filter", "categories~='(?i)Music'",
 		"--format", "best",
 		"--no-warnings",
 		"--no-playlist",
