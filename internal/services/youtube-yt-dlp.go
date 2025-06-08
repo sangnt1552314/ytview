@@ -16,7 +16,7 @@ func getYtDlpPath() string {
 	if runtime.GOOS == "windows" {
 		return "tools/yt-dlp.exe"
 	}
-	return "tools/yt-dlp"
+	return "tools/yt-dlp_macos"
 }
 
 func GetYtDlpInfo(videoURL string) ([]byte, error) {
@@ -134,13 +134,15 @@ func GetVideoAudioUrlYtDlp(videoId string) (string, error) {
 
 	args := []string{
 		"--get-url",
-		"--format", "bestaudio/best",
+		"--audio-quality", "0",
+		"--audio-format", "mp3",
+		"--extract-audio",
+		"-f", "bestaudio/best",
 		videoId,
 	}
 
 	cmd := exec.Command(ytDlpPath, args...)
 	stdout, err := cmd.Output()
-
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			log.Printf("Command failed with stderr: %s\n", string(exitErr.Stderr))

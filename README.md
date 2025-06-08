@@ -53,6 +53,7 @@ go build -o ytview ./cmd/main.go
 - [github.com/rivo/tview](https://github.com/rivo/tview) - Terminal UI library
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) - YouTube video downloading and processing
 - [github.com/joho/godotenv](https://github.com/joho/godotenv) - Environment variable management
+- [github.com/kkdai/youtube](https://github.com/kkdai/youtube) - YouTube video data extraction
 
 ## License
 

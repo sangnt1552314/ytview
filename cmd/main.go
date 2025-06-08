@@ -142,7 +142,7 @@ func (app *App) playSong(song *models.Video) {
 		app.timer.Stop()
 	}
 
-	audioUrl, err := services.GetVideoAudioUrlYtDlp(song.ID)
+	audioUrl, err := services.GetVideoAudioUrl(song.ID)
 	if err != nil {
 		log.Printf("Error getting video audio url: %v", err)
 		return
