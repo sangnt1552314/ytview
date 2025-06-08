@@ -62,27 +62,55 @@ func (app *App) setMusicTableHeader() {
 	app.music_list.SetFixed(1, 0)
 }
 
-func (app *App) performSearch(query string) {
+func (app *App) performSearch(query string, maxResults int) {
 	app.music_list.Clear()
 	app.setMusicTableHeader()
 
-	// songs, err := services.GetSongList(query, 20)
-	songs, err := services.GetSongListYtDlp(query, 5)
+	songs, err := services.GetSongListYtDlp(query, maxResults)
+
 	if err != nil {
 		app.music_list.SetCell(1, 0, tview.NewTableCell("Error: "+err.Error()))
 		return
 	}
 
 	for i, song := range songs {
-		// Format duration for display
 		duration := formatDuration(parseDuration(song.Duration))
-
-		// Store the full video object as reference in the first cell
 		titleCell := tview.NewTableCell(song.Title).SetReference(&song)
+
 		app.music_list.SetCell(i+1, 0, titleCell)
 		app.music_list.SetCell(i+1, 1, tview.NewTableCell(song.Channel))
 		app.music_list.SetCell(i+1, 2, tview.NewTableCell(duration)) // Use formatted duration
 	}
+}
+
+func (app *App) initMusicData(maxResults int) {
+	// Show loading message
+	app.music_list.SetCell(1, 0, tview.NewTableCell("Loading trending songs..."))
+
+	// Run the data fetching in a goroutine
+	go func() {
+		songs, err := services.GetTrendingSongListYtDlp(maxResults)
+
+		// Use QueueUpdateDraw to safely update UI from goroutine
+		app.app.QueueUpdateDraw(func() {
+			app.music_list.Clear()
+			app.setMusicTableHeader()
+
+			if err != nil {
+				app.music_list.SetCell(1, 0, tview.NewTableCell("Error: "+err.Error()))
+				return
+			}
+
+			for i, song := range songs {
+				duration := formatDuration(parseDuration(song.Duration))
+				titleCell := tview.NewTableCell(song.Title).SetReference(&song)
+
+				app.music_list.SetCell(i+1, 0, titleCell)
+				app.music_list.SetCell(i+1, 1, tview.NewTableCell(song.Channel))
+				app.music_list.SetCell(i+1, 2, tview.NewTableCell(duration))
+			}
+		})
+	}()
 }
 
 func (app *App) updateControlButton() {
@@ -114,7 +142,7 @@ func (app *App) playSong(song *models.Video) {
 		app.timer.Stop()
 	}
 
-	audioUrl, err := services.GetVideoAudioUrl(song.ID)
+	audioUrl, err := services.GetVideoAudioUrlYtDlp(song.ID)
 	if err != nil {
 		log.Printf("Error getting video audio url: %v", err)
 		return
@@ -286,6 +314,7 @@ func main() {
 	music_box.SetTitleAlign(tview.AlignLeft)
 
 	app.setMusicTableHeader()
+	app.initMusicData(5)
 
 	music_box.AddItem(app.music_list, 0, 1, true)
 
@@ -372,15 +401,15 @@ func main() {
 		if key == tcell.KeyEnter {
 			text := search_box.GetText()
 			if text != "" {
-				app.performSearch(text)
+				app.performSearch(text, 5)
 				app.app.SetFocus(app.music_list) // Focus directly on the table for navigation
 			}
 		}
 	})
 
 	// Set up header box
-	header_box.AddItem(search_box, 0, 6, false)
-	header_box.AddItem(status_box, 0, 1, false)
+	header_box.AddItem(search_box, 0, 1, false)
+	// header_box.AddItem(status_box, 0, 1, false)
 
 	// Menu
 	menu := tview.NewList()

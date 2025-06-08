@@ -25,6 +25,56 @@ func GetYtDlpInfo(videoURL string) ([]byte, error) {
 	return cmd.Output()
 }
 
+func GetTrendingSongListYtDlp(maxResults int) ([]models.Video, error) {
+	ytDlpPath := getYtDlpPath()
+
+	args := []string{
+		"--flat-playlist",
+		"-J",
+		"-I",
+		fmt.Sprintf("1:%d", maxResults),
+		"https://www.youtube.com/feed/trending?bp=4gINGgt5dG1hX2NoYXJ0cw%3D%3D",
+	}
+
+	cmd := exec.Command(ytDlpPath, args...)
+	stdout, err := cmd.Output()
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			log.Printf("Command failed with stderr: %s\n", string(exitErr.Stderr))
+		}
+		log.Printf("Error running command: %v\n", err)
+		return nil, err
+	}
+
+	var videos []models.Video
+	lines := bytes.Split(stdout, []byte("\n"))
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+
+		var item models.YtDlpTrendingMusicResponse
+		err := json.Unmarshal(line, &item)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, entry := range item.Entries {
+			videos = append(videos, models.Video{
+				ID:        entry.ID,
+				Title:     entry.Title,
+				Thumbnail: entry.Thumbnail,
+				Duration:  strconv.Itoa(int(entry.Duration)),
+				Views:     strconv.Itoa(entry.Views),
+				Channel:   entry.Channel,
+			})
+		}
+	}
+
+	return videos, err
+}
+
 func GetSongListYtDlp(query string, maxResults int) ([]models.Video, error) {
 	ytDlpPath := getYtDlpPath()
 
@@ -70,11 +120,34 @@ func GetSongListYtDlp(query string, maxResults int) ([]models.Video, error) {
 			ID:        item.ID,
 			Title:     item.Title,
 			Thumbnail: item.Thumbnail,
-			Duration:  strconv.Itoa(item.Duration),
+			Duration:  strconv.Itoa(int(item.Duration)),
 			Views:     strconv.Itoa(item.Views),
 			Channel:   item.Channel,
 		})
 	}
 
 	return videos, nil
+}
+
+func GetVideoAudioUrlYtDlp(videoId string) (string, error) {
+	ytDlpPath := getYtDlpPath()
+
+	args := []string{
+		"--get-url",
+		"--format", "bestaudio/best",
+		videoId,
+	}
+
+	cmd := exec.Command(ytDlpPath, args...)
+	stdout, err := cmd.Output()
+
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			log.Printf("Command failed with stderr: %s\n", string(exitErr.Stderr))
+		}
+		log.Printf("Error running command: %v\n", err)
+		return "", err
+	}
+
+	return string(stdout), nil
 }

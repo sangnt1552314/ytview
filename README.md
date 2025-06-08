@@ -14,6 +14,7 @@ A terminal-based YouTube music player written in Go, featuring a TUI (Text User 
 ## Prerequisites
 
 - Go 1.24.2 or higher
+- yt-dlp (included in tools/yt-dlp.exe)
 - A working internet connection
 
 ## Installation
@@ -50,7 +51,7 @@ go build -o ytview ./cmd/main.go
 
 - [github.com/gdamore/tcell/v2](https://github.com/gdamore/tcell) - Terminal handling
 - [github.com/rivo/tview](https://github.com/rivo/tview) - Terminal UI library
-- [github.com/kkdai/youtube/v2](https://github.com/kkdai/youtube) - YouTube video processing
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - YouTube video downloading and processing
 - [github.com/joho/godotenv](https://github.com/joho/godotenv) - Environment variable management
 
 ## License
