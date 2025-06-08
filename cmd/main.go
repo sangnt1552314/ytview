@@ -42,7 +42,7 @@ func NewApp() *App {
 	}
 }
 
-func (app *App) setTableHeader() {
+func (app *App) setMusicTableHeader() {
 	// Set headers with styling
 	app.music_list.SetCell(0, 0, tview.NewTableCell("Title").
 		SetMaxWidth(18).SetSelectable(false).
@@ -64,7 +64,7 @@ func (app *App) setTableHeader() {
 
 func (app *App) performSearch(query string) {
 	app.music_list.Clear()
-	app.setTableHeader()
+	app.setMusicTableHeader()
 
 	// songs, err := services.GetSongList(query, 20)
 	songs, err := services.GetSongListYtDlp(query, 5)
@@ -285,9 +285,21 @@ func main() {
 	music_box.SetTitle("Music")
 	music_box.SetTitleAlign(tview.AlignLeft)
 
-	app.setTableHeader()
+	app.setMusicTableHeader()
 
 	music_box.AddItem(app.music_list, 0, 1, true)
+
+	// Container - Playlist box
+	playlist_box := tview.NewFlex()
+	playlist_box.SetDirection(tview.FlexRow)
+	playlist_box.SetBorder(true)
+	playlist_box.SetTitle("Playlist")
+	playlist_box.SetTitleAlign(tview.AlignLeft)
+
+	// Container - Content box
+	content_box := tview.NewFlex().SetDirection(tview.FlexRow)
+	content_box.AddItem(music_box, 0, 1, false)
+	content_box.AddItem(playlist_box, 0, 1, false)
 
 	// Container - Player box
 	player_box := tview.NewFlex().SetDirection(tview.FlexColumn)
@@ -297,7 +309,7 @@ func main() {
 	// Set up the playing box
 	app.playing_box.SetBorder(true).
 		SetTitle(" 0:00 / 0:00 ").
-		SetTitleColor(tcell.ColorYellow) // Set initial color
+		SetTitleColor(tcell.ColorYellow)
 	app.playing_box.SetText("No Playing Song")
 	app.playing_box.SetTextColor(tcell.ColorYellow)
 
@@ -339,6 +351,16 @@ func main() {
 		}
 	})
 
+	// Header box
+	header_box := tview.NewFlex().SetDirection(tview.FlexColumn)
+
+	// Status Box
+	status_box := tview.NewTextView()
+	status_box.SetBorder(true)
+	status_box.SetTitle("Status")
+	status_box.SetTitleAlign(tview.AlignLeft)
+	status_box.SetText("...")
+
 	// Search box
 	search_box := tview.NewInputField()
 	search_box.SetBorder(true)
@@ -356,6 +378,10 @@ func main() {
 		}
 	})
 
+	// Set up header box
+	header_box.AddItem(search_box, 0, 6, false)
+	header_box.AddItem(status_box, 0, 1, false)
+
 	// Menu
 	menu := tview.NewList()
 	menu.AddItem("Settings", "", 's', nil)
@@ -370,12 +396,12 @@ func main() {
 	menu.SetTitleAlign(tview.AlignLeft)
 
 	// Setup layout
-	main_box.AddItem(search_box, 0, 1, true)
+	main_box.AddItem(header_box, 0, 1, true)
 	main_box.AddItem(flex_box, 0, 6, false)
 	main_box.AddItem(player_box, 0, 1, false)
 
 	flex_box.AddItem(menu, 0, 1, false)
-	flex_box.AddItem(music_box, 0, 5, false)
+	flex_box.AddItem(content_box, 0, 5, false)
 
 	if err := app.app.
 		SetRoot(main_box, true).
