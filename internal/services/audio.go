@@ -113,10 +113,19 @@ func PlayMedia(url string) error {
 	isPaused = false
 
 	switch runtime.GOOS {
-	case "darwin":
-		vlcPaths := []string{
-			"/Applications/VLC.app/Contents/MacOS/VLC",
-			filepath.Join(os.Getenv("HOME"), "Applications/VLC.app/Contents/MacOS/VLC"),
+	case "darwin", "windows":
+		// Try VLC first for both Windows and macOS
+		vlcPaths := []string{}
+		if runtime.GOOS == "darwin" {
+			vlcPaths = []string{
+				"/Applications/VLC.app/Contents/MacOS/VLC",
+				filepath.Join(os.Getenv("HOME"), "Applications/VLC.app/Contents/MacOS/VLC"),
+			}
+		} else {
+			vlcPaths = []string{
+				filepath.Join(os.Getenv("ProgramFiles(x86)"), "VideoLAN", "VLC", "vlc.exe"),
+				filepath.Join(os.Getenv("ProgramFiles"), "VideoLAN", "VLC", "vlc.exe"),
+			}
 		}
 
 		for _, path := range vlcPaths {
@@ -133,7 +142,6 @@ func PlayMedia(url string) error {
 
 				if err := cmd.Start(); err == nil {
 					currentCmd = cmd
-					// Monitor process in background
 					go func() {
 						cmd.Wait()
 						cmdMutex.Lock()
@@ -144,77 +152,49 @@ func PlayMedia(url string) error {
 						}
 						cmdMutex.Unlock()
 					}()
-					// Give VLC a moment to start up its HTTP interface
-					time.Sleep(100 * time.Millisecond)
-					return nil
-				}
-			}
-		}
 
-		// Fallback to QuickTime if VLC is not available
-		cmd := exec.Command("open", "-g", "-a", "QuickTime Player", url)
-		if err := cmd.Start(); err == nil {
-			currentCmd = cmd
-			go func() {
-				cmd.Wait()
-				cmdMutex.Lock()
-				if currentCmd == cmd {
-					currentCmd = nil
-					isPaused = false
-					lastUrl = ""
-				}
-				cmdMutex.Unlock()
-			}()
-			return nil
-		}
-		return cmd.Start()
-
-	case "windows":
-		// Windows: Try VLC first, then fallback to Windows Media Player
-		vlcPaths := []string{
-			filepath.Join(os.Getenv("ProgramFiles(x86)"), "VideoLAN", "VLC", "vlc.exe"),
-			filepath.Join(os.Getenv("ProgramFiles"), "VideoLAN", "VLC", "vlc.exe"),
-		}
-
-		// Try VLC first
-		for _, path := range vlcPaths {
-			if _, err := os.Stat(path); err == nil {
-				cmd := exec.Command(path,
-					"--intf", "http", // Enable HTTP interface
-					"--http-port", vlcPort, // Set HTTP port
-					"--http-password", "ytview", // Set password for HTTP interface
-					"--extraintf", "http", // Add HTTP as extra interface
-					"--no-video",      // Disable video output
-					"--play-and-exit", // Exit when playback ends
-					url)
-
-				if err := cmd.Start(); err == nil {
-					currentCmd = cmd
-					go func() {
-						cmd.Wait()
-						cmdMutex.Lock()
-						if currentCmd == cmd {
-							currentCmd = nil
-							isPaused = false
-							lastUrl = ""
+					// Wait for VLC's HTTP interface to initialize with retries
+					maxRetries := 10
+					for i := 0; i < maxRetries; i++ {
+						time.Sleep(100 * time.Millisecond)
+						// Try to connect to VLC's HTTP interface
+						resp, err := http.Get(fmt.Sprintf("http://:%s@localhost:%s/requests/status.xml", "ytview", vlcPort))
+						if err == nil {
+							resp.Body.Close()
+							return nil
 						}
-						cmdMutex.Unlock()
-					}()
-					// Give VLC a moment to start up its HTTP interface
-					time.Sleep(100 * time.Millisecond)
-					return nil
+					}
+
+					// If we get here, VLC started but HTTP interface failed to initialize
+					stopCurrentMedia()
+					return fmt.Errorf("VLC HTTP interface failed to initialize")
 				}
 			}
 		}
 
-		// Fallback to Windows Media Player
-		if wmp != nil && wmp.isAvailable {
+		// OS-specific fallbacks if VLC fails
+		if runtime.GOOS == "darwin" {
+			cmd := exec.Command("open", "-g", "-a", "QuickTime Player", url)
+			if err := cmd.Start(); err == nil {
+				currentCmd = cmd
+				go func() {
+					cmd.Wait()
+					cmdMutex.Lock()
+					if currentCmd == cmd {
+						currentCmd = nil
+						isPaused = false
+						lastUrl = ""
+					}
+					cmdMutex.Unlock()
+				}()
+				return nil
+			}
+		} else if runtime.GOOS == "windows" && wmp != nil && wmp.isAvailable {
 			cmd, err := wmp.playInBackground(url)
 			if err == nil {
 				currentCmd = cmd
-				wmpCmd = cmd // Keep track of WMP command separately
+				wmpCmd = cmd
 				go func() {
-					// Monitor process status
 					for {
 						if IsMediaFinished() {
 							cmdMutex.Lock()
@@ -276,23 +256,33 @@ func PauseMedia() error {
 
 	// For both Windows and macOS, try VLC HTTP interface first
 	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
-		// Send pause command to VLC's HTTP interface
-		resp, err := http.Get(fmt.Sprintf("http://:%s@localhost:%s/requests/status.xml?command=pl_pause", "ytview", vlcPort))
-		if err == nil {
-			resp.Body.Close()
-			isPaused = true
-			return nil
+		// Send pause command to VLC's HTTP interface with retries
+		maxRetries := 3
+		var lastErr error
+		for i := 0; i < maxRetries; i++ {
+			resp, err := http.Get(fmt.Sprintf("http://:%s@localhost:%s/requests/status.xml?command=pl_pause", "ytview", vlcPort))
+			if err == nil {
+				resp.Body.Close()
+				isPaused = true
+				return nil
+			}
+			lastErr = err
+			time.Sleep(100 * time.Millisecond)
 		}
 
-		// OS-specific fallbacks
+		// If VLC HTTP interface fails, try OS-specific fallbacks
 		if runtime.GOOS == "darwin" {
 			// Fallback to QuickTime if VLC command failed
 			pauseCmd := exec.Command("killall", "-STOP", "QuickTime Player")
-			err = pauseCmd.Run()
+			err := pauseCmd.Run()
 			if err == nil {
 				isPaused = true
 				return nil
 			}
+			return fmt.Errorf("failed to pause media: VLC failed with %v, QuickTime failed with %v", lastErr, err)
+		} else if runtime.GOOS == "windows" {
+			// For Windows, we might want to add a WMP-specific pause command here
+			return fmt.Errorf("failed to pause media: VLC HTTP interface error: %v", lastErr)
 		}
 	}
 	return fmt.Errorf("pause not supported on this OS or player")
@@ -306,23 +296,33 @@ func resumeMedia() error {
 
 	// For both Windows and macOS, try VLC HTTP interface first
 	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
-		// Send play command to VLC's HTTP interface
-		resp, err := http.Get(fmt.Sprintf("http://:%s@localhost:%s/requests/status.xml?command=pl_play", "ytview", vlcPort))
-		if err == nil {
-			resp.Body.Close()
-			isPaused = false
-			return nil
+		// Send play command to VLC's HTTP interface with retries
+		maxRetries := 3
+		var lastErr error
+		for i := 0; i < maxRetries; i++ {
+			resp, err := http.Get(fmt.Sprintf("http://:%s@localhost:%s/requests/status.xml?command=pl_play", "ytview", vlcPort))
+			if err == nil {
+				resp.Body.Close()
+				isPaused = false
+				return nil
+			}
+			lastErr = err
+			time.Sleep(100 * time.Millisecond)
 		}
 
-		// OS-specific fallbacks
+		// If VLC HTTP interface fails, try OS-specific fallbacks
 		if runtime.GOOS == "darwin" {
 			// Fallback to QuickTime if VLC command failed
 			resumeCmd := exec.Command("killall", "-CONT", "QuickTime Player")
-			err = resumeCmd.Run()
+			err := resumeCmd.Run()
 			if err == nil {
 				isPaused = false
 				return nil
 			}
+			return fmt.Errorf("failed to resume media: VLC failed with %v, QuickTime failed with %v", lastErr, err)
+		} else if runtime.GOOS == "windows" {
+			// For Windows, we might want to add a WMP-specific resume command here
+			return fmt.Errorf("failed to resume media: VLC HTTP interface error: %v", lastErr)
 		}
 	}
 	return fmt.Errorf("resume not supported on this OS or player")
@@ -333,15 +333,22 @@ func stopCurrentMedia() {
 	if currentCmd != nil && currentCmd.Process != nil {
 		// Try to stop via HTTP interface first for both Windows and macOS
 		if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
-			resp, err := http.Get(fmt.Sprintf("http://:%s@localhost:%s/requests/status.xml?command=pl_stop", "ytview", vlcPort))
-			if err == nil {
-				resp.Body.Close()
-				time.Sleep(100 * time.Millisecond) // Give VLC time to stop
+			// Try multiple times to stop via HTTP interface
+			maxRetries := 3
+			for i := 0; i < maxRetries; i++ {
+				resp, err := http.Get(fmt.Sprintf("http://:%s@localhost:%s/requests/status.xml?command=pl_stop", "ytview", vlcPort))
+				if err == nil {
+					resp.Body.Close()
+					time.Sleep(100 * time.Millisecond)
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
 			}
 		}
 
 		// Force kill the process if needed
 		if runtime.GOOS == "windows" {
+			// Try to cleanly terminate VLC first
 			exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprint(currentCmd.Process.Pid)).Run()
 		} else {
 			currentCmd.Process.Kill()
