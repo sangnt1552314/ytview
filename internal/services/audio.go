@@ -20,6 +20,83 @@ var (
 	vlcPort    = "8080" // VLC HTTP interface port
 )
 
+// Windows process creation flags
+const (
+	CREATE_NO_WINDOW = 0x08000000
+	DETACHED_PROCESS = 0x00000008
+)
+
+// WindowsMediaPlayer handles audio playback using Windows Media Player
+type WindowsMediaPlayer struct {
+	wmpPath     string
+	isAvailable bool
+}
+
+// newWindowsMediaPlayer creates a new Windows Media Player handler
+func newWindowsMediaPlayer() *WindowsMediaPlayer {
+	wmpPaths := []string{
+		filepath.Join(os.Getenv("ProgramFiles(x86)"), "Windows Media Player", "wmplayer.exe"),
+		filepath.Join(os.Getenv("ProgramFiles"), "Windows Media Player", "wmplayer.exe"),
+	}
+
+	var wmpPath string
+	for _, path := range wmpPaths {
+		if _, err := os.Stat(path); err == nil {
+			wmpPath = path
+			break
+		}
+	}
+
+	return &WindowsMediaPlayer{
+		wmpPath:     wmpPath,
+		isAvailable: wmpPath != "",
+	}
+}
+
+// playInBackground starts WMP in background with minimal UI
+func (w *WindowsMediaPlayer) playInBackground(url string) (*exec.Cmd, error) {
+	if !w.isAvailable {
+		return nil, fmt.Errorf("Windows Media Player is not available")
+	}
+
+	// Create a new process with hidden window
+	si := &syscall.StartupInfo{
+		Flags:      syscall.STARTF_USESHOWWINDOW,
+		ShowWindow: syscall.SW_HIDE,
+	}
+	pi := &syscall.ProcessInformation{}
+
+	// Convert command line to UTF16 as required by Windows API
+	argv := syscall.StringToUTF16Ptr(fmt.Sprintf(`"%s" /play /close "%s"`, w.wmpPath, url))
+
+	// Create process in background
+	err := syscall.CreateProcess(
+		nil,
+		argv,
+		nil,
+		nil,
+		false,
+		CREATE_NO_WINDOW|DETACHED_PROCESS,
+		nil,
+		nil,
+		si,
+		pi,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start Windows Media Player: %v", err)
+	}
+
+	// Close handles to avoid resource leaks
+	syscall.CloseHandle(pi.Thread)
+	syscall.CloseHandle(pi.Process)
+
+	// Create exec.Cmd for process management
+	cmd := exec.Command(w.wmpPath)
+	cmd.Process = &os.Process{Pid: int(pi.ProcessId)}
+
+	return cmd, nil
+}
+
 // PlayMedia starts playing the media from the given URL
 func PlayMedia(url string) error {
 	cmdMutex.Lock()
@@ -93,17 +170,24 @@ func PlayMedia(url string) error {
 		return cmd.Start()
 
 	case "windows":
-		// Windows: Try Windows Media Player, then VLC
-		mediaPlayers := []string{
-			filepath.Join(os.Getenv("ProgramFiles(x86)"), "Windows Media Player", "wmplayer.exe"),
-			filepath.Join(os.Getenv("ProgramFiles"), "Windows Media Player", "wmplayer.exe"),
+		// Windows: Try VLC first, then fallback to Windows Media Player
+		vlcPaths := []string{
 			filepath.Join(os.Getenv("ProgramFiles(x86)"), "VideoLAN", "VLC", "vlc.exe"),
 			filepath.Join(os.Getenv("ProgramFiles"), "VideoLAN", "VLC", "vlc.exe"),
 		}
 
-		for _, player := range mediaPlayers {
-			if _, err := os.Stat(player); err == nil {
-				cmd := exec.Command(player, "--qt-start-minimized", url)
+		// Try VLC first
+		for _, path := range vlcPaths {
+			if _, err := os.Stat(path); err == nil {
+				cmd := exec.Command(path,
+					"--intf", "http", // Enable HTTP interface
+					"--http-port", vlcPort, // Set HTTP port
+					"--http-password", "ytview", // Set password for HTTP interface
+					"--extraintf", "http", // Add HTTP as extra interface
+					"--no-video",      // Disable video output
+					"--play-and-exit", // Exit when playback ends
+					url)
+
 				if err := cmd.Start(); err == nil {
 					currentCmd = cmd
 					go func() {
@@ -116,10 +200,40 @@ func PlayMedia(url string) error {
 						}
 						cmdMutex.Unlock()
 					}()
+					// Give VLC a moment to start up its HTTP interface
+					time.Sleep(100 * time.Millisecond)
 					return nil
 				}
 			}
 		}
+
+		// Fallback to Windows Media Player
+		if wmp != nil && wmp.isAvailable {
+			cmd, err := wmp.playInBackground(url)
+			if err == nil {
+				currentCmd = cmd
+				wmpCmd = cmd // Keep track of WMP command separately
+				go func() {
+					// Monitor process status
+					for {
+						if IsMediaFinished() {
+							cmdMutex.Lock()
+							if currentCmd == cmd {
+								currentCmd = nil
+								wmpCmd = nil
+								isPaused = false
+								lastUrl = ""
+							}
+							cmdMutex.Unlock()
+							break
+						}
+						time.Sleep(500 * time.Millisecond)
+					}
+				}()
+				return nil
+			}
+		}
+
 		return fmt.Errorf("no suitable media player found")
 
 	case "linux":
@@ -160,7 +274,8 @@ func PauseMedia() error {
 		return fmt.Errorf("no media is playing")
 	}
 
-	if runtime.GOOS == "darwin" {
+	// For both Windows and macOS, try VLC HTTP interface first
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
 		// Send pause command to VLC's HTTP interface
 		resp, err := http.Get(fmt.Sprintf("http://:%s@localhost:%s/requests/status.xml?command=pl_pause", "ytview", vlcPort))
 		if err == nil {
@@ -169,15 +284,18 @@ func PauseMedia() error {
 			return nil
 		}
 
-		// Fallback to QuickTime if VLC command failed
-		pauseCmd := exec.Command("killall", "-STOP", "QuickTime Player")
-		err = pauseCmd.Run()
-		if err == nil {
-			isPaused = true
-			return nil
+		// OS-specific fallbacks
+		if runtime.GOOS == "darwin" {
+			// Fallback to QuickTime if VLC command failed
+			pauseCmd := exec.Command("killall", "-STOP", "QuickTime Player")
+			err = pauseCmd.Run()
+			if err == nil {
+				isPaused = true
+				return nil
+			}
 		}
 	}
-	return fmt.Errorf("pause not supported on this OS")
+	return fmt.Errorf("pause not supported on this OS or player")
 }
 
 // resumeMedia resumes the paused media
@@ -186,7 +304,8 @@ func resumeMedia() error {
 		return fmt.Errorf("no paused media to resume")
 	}
 
-	if runtime.GOOS == "darwin" {
+	// For both Windows and macOS, try VLC HTTP interface first
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
 		// Send play command to VLC's HTTP interface
 		resp, err := http.Get(fmt.Sprintf("http://:%s@localhost:%s/requests/status.xml?command=pl_play", "ytview", vlcPort))
 		if err == nil {
@@ -195,32 +314,37 @@ func resumeMedia() error {
 			return nil
 		}
 
-		// Fallback to QuickTime if VLC command failed
-		resumeCmd := exec.Command("killall", "-CONT", "QuickTime Player")
-		err = resumeCmd.Run()
-		if err == nil {
-			isPaused = false
-			return nil
+		// OS-specific fallbacks
+		if runtime.GOOS == "darwin" {
+			// Fallback to QuickTime if VLC command failed
+			resumeCmd := exec.Command("killall", "-CONT", "QuickTime Player")
+			err = resumeCmd.Run()
+			if err == nil {
+				isPaused = false
+				return nil
+			}
 		}
 	}
-	return fmt.Errorf("resume not supported on this OS")
+	return fmt.Errorf("resume not supported on this OS or player")
 }
 
 // stopCurrentMedia stops any currently playing media
 func stopCurrentMedia() {
 	if currentCmd != nil && currentCmd.Process != nil {
-		if runtime.GOOS != "windows" {
-			// Try to stop via HTTP interface first
-			if runtime.GOOS == "darwin" {
-				resp, err := http.Get(fmt.Sprintf("http://:%s@localhost:%s/requests/status.xml?command=pl_stop", "ytview", vlcPort))
-				if err == nil {
-					resp.Body.Close()
-					time.Sleep(100 * time.Millisecond) // Give VLC time to stop
-				}
+		// Try to stop via HTTP interface first for both Windows and macOS
+		if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+			resp, err := http.Get(fmt.Sprintf("http://:%s@localhost:%s/requests/status.xml?command=pl_stop", "ytview", vlcPort))
+			if err == nil {
+				resp.Body.Close()
+				time.Sleep(100 * time.Millisecond) // Give VLC time to stop
 			}
-			currentCmd.Process.Kill()
-		} else {
+		}
+
+		// Force kill the process if needed
+		if runtime.GOOS == "windows" {
 			exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprint(currentCmd.Process.Pid)).Run()
+		} else {
+			currentCmd.Process.Kill()
 		}
 		currentCmd = nil
 		isPaused = false
@@ -247,7 +371,7 @@ func GetPlayerState() string {
 	return "playing"
 }
 
-// Add a function to check if the media is still playing
+// IsMediaFinished checks if the media playback has finished
 func IsMediaFinished() bool {
 	cmdMutex.Lock()
 	defer cmdMutex.Unlock()
@@ -256,20 +380,31 @@ func IsMediaFinished() bool {
 		return true
 	}
 
-	// Check if process has exited
-	if runtime.GOOS != "windows" {
-		if process, err := os.FindProcess(currentCmd.Process.Pid); err == nil {
-			// On Unix systems, FindProcess always succeeds, so we need to send signal 0 to test if process exists
-			err := process.Signal(syscall.Signal(0))
-			if err != nil {
-				// Process not found or finished
+	if runtime.GOOS == "windows" {
+		// Special handling for Windows Media Player
+		if wmpCmd != nil && wmpCmd == currentCmd {
+			// Check if process still exists
+			process, err := os.FindProcess(currentCmd.Process.Pid)
+			if err != nil || process == nil {
 				currentCmd = nil
+				wmpCmd = nil
 				isPaused = false
 				lastUrl = ""
 				return true
 			}
 
-			// Additional check: see if process has exited
+			// Try to get process info - will fail if process is gone
+			h, err := syscall.OpenProcess(syscall.PROCESS_QUERY_INFORMATION, false, uint32(process.Pid))
+			if err != nil {
+				currentCmd = nil
+				wmpCmd = nil
+				isPaused = false
+				lastUrl = ""
+				return true
+			}
+			syscall.CloseHandle(h)
+		} else {
+			// For other players like VLC
 			if currentCmd.ProcessState != nil && currentCmd.ProcessState.Exited() {
 				currentCmd = nil
 				isPaused = false
@@ -277,8 +412,22 @@ func IsMediaFinished() bool {
 				return true
 			}
 		}
-	} else {
-		// For Windows
+		return false
+	}
+
+	// Unix-like systems
+	if process, err := os.FindProcess(currentCmd.Process.Pid); err == nil {
+		// On Unix systems, FindProcess always succeeds, so we need to send signal 0 to test if process exists
+		err := process.Signal(syscall.Signal(0))
+		if err != nil {
+			// Process not found or finished
+			currentCmd = nil
+			isPaused = false
+			lastUrl = ""
+			return true
+		}
+
+		// Additional check: see if process has exited
 		if currentCmd.ProcessState != nil && currentCmd.ProcessState.Exited() {
 			currentCmd = nil
 			isPaused = false
@@ -288,4 +437,15 @@ func IsMediaFinished() bool {
 	}
 
 	return false
+}
+
+var (
+	wmp    *WindowsMediaPlayer
+	wmpCmd *exec.Cmd
+)
+
+func init() {
+	if runtime.GOOS == "windows" {
+		wmp = newWindowsMediaPlayer()
+	}
 }
