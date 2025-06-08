@@ -33,3 +33,5 @@ go.work.sum
 
 # Log file
 logs/
+
+yt-dlp_macos
