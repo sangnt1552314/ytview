@@ -73,6 +73,11 @@ func (app *App) performSearch(query string, maxResults int) {
 		return
 	}
 
+	if len(songs) == 0 {
+		app.music_list.SetCell(1, 0, tview.NewTableCell("No results found"))
+		return
+	}
+
 	for i, song := range songs {
 		duration := formatDuration(parseDuration(song.Duration))
 		titleCell := tview.NewTableCell(song.Title).SetReference(&song)
@@ -366,9 +371,13 @@ func main() {
 		if row > 0 { // Ignore header row
 			cell := app.music_list.GetCell(row, 0)
 			video, ok := cell.GetReference().(*models.Video)
-			if ok {
-				app.playSong(video)
+			if video == nil || !ok {
+				log.Println("No video found in selected cell")
+				return
 			}
+
+			app.playSong(video)
+			app.app.SetFocus(app.playing_box)
 		}
 	})
 

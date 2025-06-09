@@ -89,6 +89,7 @@ func GetSongListYtDlp(query string, maxResults int) ([]models.Video, error) {
 		"--skip-download",
 		"--quiet",
 		"-j",
+		"--flat-playlist",
 		"-S view_count",
 		fmt.Sprintf("ytsearch%d:%s", maxResults, query),
 	}
