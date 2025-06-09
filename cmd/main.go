@@ -314,21 +314,13 @@ func main() {
 	music_box.SetTitleAlign(tview.AlignLeft)
 
 	app.setMusicTableHeader()
-	app.initMusicData(5)
+	// app.initMusicData(5)
 
-	music_box.AddItem(app.music_list, 0, 1, true)
-
-	// Container - Playlist box
-	playlist_box := tview.NewFlex()
-	playlist_box.SetDirection(tview.FlexRow)
-	playlist_box.SetBorder(true)
-	playlist_box.SetTitle("Playlist")
-	playlist_box.SetTitleAlign(tview.AlignLeft)
+	music_box.AddItem(app.music_list, 0, 1, false)
 
 	// Container - Content box
 	content_box := tview.NewFlex().SetDirection(tview.FlexRow)
 	content_box.AddItem(music_box, 0, 1, false)
-	content_box.AddItem(playlist_box, 0, 1, false)
 
 	// Container - Player box
 	player_box := tview.NewFlex().SetDirection(tview.FlexColumn)

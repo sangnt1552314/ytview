@@ -17,7 +17,7 @@ var (
 	cmdMutex   sync.Mutex
 	isPaused   bool
 	lastUrl    string
-	vlcPort    = "8080" // VLC HTTP interface port
+	vlcPort    = "9000" // VLC HTTP interface port
 )
 
 // PlayMedia starts playing the media from the given URL
